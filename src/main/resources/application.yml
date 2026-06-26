@@ -1,0 +1,119 @@
+server:
+  port: 5000
+  compression:
+    enabled: true
+    mime-types: text/html,text/xml,text/plain,text/css,text/javascript,application/javascript,application/json,application/xml
+    min-response-size: 2048
+
+spring:
+  application:
+    name: finbridge-backend
+
+  datasource:
+    # Secrets MUST be supplied via environment variables — there are deliberately NO committed
+    # fallbacks for DB_PASSWORD / JWT_SECRET. The app connects as a least-privilege role
+    # (finbridge_svc), never the database superuser.
+    url: ${DB_URL:jdbc:postgresql://db.vtcgcjtroxvtsjjfattt.supabase.co:6543/postgres}
+    username: ${DB_USERNAME:finbridge_svc}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # Keep the footprint small — Supabase's direct-connection limit is low, and a large
+      # pool (especially across multiple app restarts) can exhaust it. Connections are also
+      # recycled so a hard-killed JVM doesn't leave long-lived orphans on the server side.
+      maximum-pool-size: 5
+      minimum-idle: 1
+      connection-timeout: 30000
+      idle-timeout: 120000
+      max-lifetime: 300000
+      keepalive-time: 60000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    # SQL logging is OFF by default (perf + avoids PII in logs). Enable in the 'dev' profile only.
+    show-sql: false
+    # Keep open-session-in-view ON: several read endpoints build their DTOs outside an explicit
+    # transaction and touch lazy associations during mapping. Disabling it caused
+    # LazyInitializationException (e.g. service-request listing). Spring's default is true.
+    open-in-view: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: false
+        default_batch_fetch_size: 16
+        jdbc:
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    ignore-missing-migrations: true
+    validate-on-migrate: false
+
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    from: ${MAIL_FROM:}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 10
+
+app:
+  jwt:
+    # No committed fallback — JWT_SECRET MUST be provided via env (min 32 chars).
+    secret: ${JWT_SECRET}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+
+  frontend-url: ${FRONTEND_URL:http://localhost:5173}
+
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://localhost:5175,http://localhost:5176,http://localhost:5177,http://127.0.0.1:5173,http://127.0.0.1:5174,http://127.0.0.1:5175,http://127.0.0.1:5176,http://127.0.0.1:5177}
+
+  payments:
+    # Mock gateway: when true, a B2B payment can be settled without a real charge (demo only).
+    # MUST be false in production until Razorpay order-creation + signature verification is wired.
+    mock-enabled: ${PAYMENTS_MOCK_ENABLED:true}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: method
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health          # metrics/info NOT publicly exposed
+
+  endpoint:
+    health:
+      show-details: never        # no internals leaked to anonymous callers
+      probes:
+        enabled: true            # liveness/readiness probes for orchestrators
+
+  health:
+    mail:
+      enabled: false             # SMTP is optional; don't let it fail the liveness probe
+
+logging:
+  level:
+    root: INFO
+    com.finbridge: INFO          # DEBUG only in the 'dev' profile
+    org.springframework.security: INFO
